@@ -188,24 +188,35 @@ export class World {
     const W = maxX - minX;
     const D = maxZ - minZ;
 
-    // Lantai kayu
+    // Lantai kayu. Pola dibuat dengan random ber-seed dan digambar melingkar
+    // (wrap) supaya tile-nya menyambung mulus tanpa papan gelap/terpotong.
     const floorTex = canvasTexture(512, 512, (g, w, h) => {
+      let seed = 1234;
+      const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
       const rows = 8;
+      const rh = h / rows;
+      g.fillStyle = 'rgb(132,86,55)';
+      g.fillRect(0, 0, w, h);
       for (let r = 0; r < rows; r++) {
-        let x = -((r * 97) % 200);
-        while (x < w) {
-          const len = 180 + ((x * 13 + r * 71) % 120);
-          const shade = 0.85 + (((x * 7 + r * 31) % 30) / 100);
-          g.fillStyle = `rgb(${Math.round(150 * shade)},${Math.round(98 * shade)},${Math.round(62 * shade)})`;
-          g.fillRect(x, (r * h) / rows, len, h / rows);
-          g.fillStyle = 'rgba(0,0,0,0.25)';
-          g.fillRect(x, (r * h) / rows, 2, h / rows);
+        let x = Math.floor(rand() * 200);
+        const end = x + w;
+        while (x < end) {
+          const len = Math.min(170 + Math.floor(rand() * 110), end - x);
+          const shade = 0.9 + rand() * 0.16; // selalu dalam rentang terang yang sama
+          g.fillStyle = `rgb(${Math.round(148 * shade)},${Math.round(97 * shade)},${Math.round(62 * shade)})`;
+          for (const off of [0, -w]) {
+            g.fillRect(x + off, r * rh, len, rh);
+            g.fillStyle = 'rgba(60,35,20,0.35)';
+            g.fillRect(x + off, r * rh, 2, rh);
+            g.fillStyle = `rgb(${Math.round(148 * shade)},${Math.round(97 * shade)},${Math.round(62 * shade)})`;
+          }
           x += len;
         }
-        g.fillStyle = 'rgba(0,0,0,0.3)';
-        g.fillRect(0, (r * h) / rows, w, 2);
+        g.fillStyle = 'rgba(60,35,20,0.35)';
+        g.fillRect(0, r * rh, w, 2);
       }
     });
+    floorTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
     floorTex.repeat.set(W / 4, D / 4);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ map: floorTex }));
@@ -215,8 +226,9 @@ export class World {
     this.scene.add(floor);
     this.floor = floor;
 
-    // Pinggiran lantai (tebal) biar terlihat seperti diorama
-    this.box(W + 0.4, 0.3, D + 0.4, '#2a2f3d', (minX + maxX) / 2, -0.3, (minZ + maxZ) / 2, { shadow: false });
+    // Pinggiran lantai (tebal) biar terlihat seperti diorama. Sisi atasnya sedikit di bawah
+    // lantai supaya tidak berebut kedalaman dengan lantai (penyebab kedap-kedip / z-fighting).
+    this.box(W + 0.4, 0.3, D + 0.4, '#2a2f3d', (minX + maxX) / 2, -0.32, (minZ + maxZ) / 2, { shadow: false });
 
     // Dinding belakang & kiri
     this.box(W + 0.2, wallH, 0.2, PALETTE.wall, (minX + maxX) / 2, 0, minZ - 0.1);

@@ -135,6 +135,7 @@ function card(t) {
       ${t.notes.length ? `<ul class="knotes">${t.notes.map((n) => `<li><b>${escapeHtml(agentName(n.by))}:</b> ${escapeHtml(n.text)}</li>`).join('')}</ul>` : ''}
       <div class="kactions">
         ${t.assignee ? '' : `<select data-act="assign"><option value="">Tugaskan ke…</option>${ctx.config.agents.map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('')}</select>`}
+        ${t.status === 'proses' ? `<button class="btn small" data-act="stop">⏹ Hentikan</button>` : ''}
         ${t.status !== 'proses' && t.assignee ? `<button class="btn small" data-act="run">${t.status === 'todo' ? '▶ Jalankan' : '↻ Kerjakan ulang'}</button>` : ''}
         ${t.assignee ? `<button class="btn small" data-act="chat">💬 Chat ${escapeHtml(agentName(t.assignee))}</button>` : ''}
         <button class="btn small danger" data-act="delete">🗑 Hapus</button>
@@ -152,6 +153,7 @@ function card(t) {
     if (b) b[name === 'assign' ? 'onchange' : 'onclick'] = (e) => fn(e).catch?.((err) => ctx.toast(err.message));
   };
   act('run', () => tasksApi.update(t.id, { status: 'todo' }));
+  act('stop', () => (confirm(`Hentikan kartu #${t.id}${kids.length ? ' beserta subtugasnya' : ''}?`) ? tasksApi.stop(t.id) : Promise.resolve()));
   act('assign', (e) => e.target.value && tasksApi.update(t.id, { assignee: e.target.value }));
   act('chat', async () => ctx.openChat(t.assignee));
   act('delete', () => (confirm(`Hapus kartu #${t.id}${kids.length ? ' beserta subtugasnya' : ''}?`) ? tasksApi.remove(t.id) : Promise.resolve()));
@@ -204,8 +206,9 @@ function renderLog(body) {
 
 async function renderFiles(body) {
   if (state.file) {
-    body.innerHTML = `<div class="kfile-head"><button class="btn small" id="file-back">← Semua berkas</button><code></code></div><pre class="kfile"></pre>`;
+    body.innerHTML = `<div class="kfile-head"><button class="btn small" id="file-back">← Semua berkas</button><code></code><a class="btn small" download>⬇ Unduh</a></div><pre class="kfile"></pre>`;
     $('code', body).textContent = state.file.path;
+    $('a', body).href = filesApi.downloadUrl(state.file.path);
     $('pre', body).textContent = state.file.content;
     $('#file-back').onclick = () => {
       state.file = null;
@@ -225,8 +228,11 @@ async function renderFiles(body) {
     ul.className = 'kfiles';
     for (const f of files) {
       const li = document.createElement('li');
-      li.innerHTML = `<span>📄 <span class="p"></span></span><small>${(f.size / 1024).toFixed(1)} KB · ${new Date(f.updatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</small>`;
+      li.innerHTML = `<span>📄 <span class="p"></span></span><span class="fmeta"><small>${(f.size / 1024).toFixed(1)} KB · ${new Date(f.updatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</small><a class="icon-btn" title="Unduh" download>⬇</a></span>`;
       li.querySelector('.p').textContent = f.path;
+      const dl = li.querySelector('a');
+      dl.href = filesApi.downloadUrl(f.path);
+      dl.onclick = (e) => e.stopPropagation();
       li.onclick = () => openFile(f.path);
       ul.appendChild(li);
     }

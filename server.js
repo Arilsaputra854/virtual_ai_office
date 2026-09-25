@@ -21,8 +21,18 @@ const board = await import('./lib/board.js');
 const agents = await import('./lib/agents.js');
 const ws = await import('./lib/workspace.js');
 
-const HOST = process.env.HOST || '127.0.0.1';
-const PORT = Number(process.env.PORT || 3000);
+// Prioritas: argumen CLI (--port 8080 / --host 0.0.0.0) > .env > default.
+function cliArg(name) {
+  const i = process.argv.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+  if (i < 0) return undefined;
+  return process.argv[i].includes('=') ? process.argv[i].split('=')[1] : process.argv[i + 1];
+}
+const HOST = cliArg('host') || process.env.HOST || '127.0.0.1';
+const PORT = Number(cliArg('port') ?? process.env.PORT ?? 3000);
+if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
+  console.error(`Port tidak valid: ${cliArg('port') ?? process.env.PORT}`);
+  process.exit(1);
+}
 const PASSWORD = process.env.OFFICE_PASSWORD || '';
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const THREE_DIR = path.join(ROOT, 'node_modules', 'three');
@@ -218,6 +228,11 @@ async function route(req, res, url) {
     board.clearDone();
     return sendJson(res, 200, { ok: true });
   }
+  const stop = p.match(/^\/api\/tasks\/(\d+)\/stop$/);
+  if (stop && m === 'POST') {
+    agents.stopTask(Number(stop[1]));
+    return sendJson(res, 200, { ok: true });
+  }
   const tm = p.match(/^\/api\/tasks\/(\d+)$/);
   if (tm && m === 'PATCH') {
     const body = await readBody(req);
@@ -232,11 +247,20 @@ async function route(req, res, url) {
     return t ? sendJson(res, 200, t) : sendJson(res, 404, { error: 'Kartu tidak ada' });
   }
   if (tm && m === 'DELETE') {
+    agents.stopTask(Number(tm[1]));
     board.deleteTask(tm[1]);
     return sendJson(res, 200, { ok: true });
   }
 
   // Workspace
+  if (p === '/api/files/raw' && m === 'GET') {
+    const rel = url.searchParams.get('path') || '';
+    const full = safeJoin(ws.WORKSPACE, rel);
+    if (!full) return sendJson(res, 403, { error: 'Dilarang' });
+    const name = path.basename(full).replace(/[^\w.-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    return serveFile(res, full);
+  }
   if (p === '/api/files' && m === 'GET') {
     const file = url.searchParams.get('path');
     if (!file) return sendJson(res, 200, { files: await ws.listFiles() });
@@ -270,7 +294,26 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`🏢 Virtual AI Office jalan di http://${HOST}:${PORT}`);
-  agents.schedule(); // lanjutkan tugas yang tertunda
-});
+// Kalau port sudah dipakai, coba port berikutnya (maks 10x).
+function listen(port, attempt = 0) {
+  const onError = (err) => {
+    if (err.code === 'EADDRINUSE' && attempt < 10 && port !== 0) {
+      console.warn(`⚠️  Port ${port} sudah dipakai, mencoba ${port + 1}…`);
+      return listen(port + 1, attempt + 1);
+    }
+    if (err.code === 'EACCES') console.error(`❌ Tidak punya izin memakai port ${port} (port di bawah 1024 butuh root). Coba: npm start -- --port 8080`);
+    else console.error(`❌ Gagal menjalankan server: ${err.message}`);
+    process.exit(1);
+  };
+  server.once('error', onError);
+  server.listen(port, HOST, () => {
+    server.off('error', onError);
+    const actual = server.address().port;
+    const shown = HOST === '0.0.0.0' || HOST === '::' ? 'localhost' : HOST;
+    console.log(`🏢 Virtual AI Office jalan di http://${shown}:${actual}`);
+    if (shown === 'localhost') console.log('   (bisa diakses dari perangkat lain di jaringan yang sama lewat IP komputer ini)');
+    if (shown === 'localhost' && !PASSWORD) console.warn('⚠️  Server terbuka ke jaringan tanpa OFFICE_PASSWORD — siapa pun di jaringan bisa memakai kuota API kamu.');
+    agents.schedule(); // lanjutkan tugas yang tertunda
+  });
+}
+listen(PORT);

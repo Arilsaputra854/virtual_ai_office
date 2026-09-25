@@ -15,7 +15,7 @@ Setiap agen bisa memanggil **tools** (format function calling OpenAI):
 | `create_task` | Mendelegasikan pekerjaan ke rekan sebagai kartu kanban baru |
 | `ask_agent` | Bertanya langsung ke rekan dan menunggu jawabannya |
 | `update_task` | Memindahkan kartu, menambah catatan, atau meminta revisi (`status: "todo"` + feedback) |
-| `list_tasks` | Melihat isi papan kanban |
+| `list_tasks` / `get_task` | Melihat isi papan kanban / detail lengkap satu kartu (termasuk hasil kerja rekan) |
 | `write_file` / `read_file` / `list_files` | Menulis dan membaca dokumen/kode di workspace bersama `data/workspace/` |
 | `fetch_url` | Membuka halaman web publik (opsional, aktif kalau `TOOLS_HTTP=1`) |
 
@@ -30,7 +30,7 @@ Cara lain memberi tugas:
 - **📋 Kanban → + Tugas baru**: buat kartu dan pilih agennya. Agen itu langsung mengerjakannya (dan boleh mendelegasikan bagiannya).
 - **👥 Rapat**: centang *"pemimpin membagi TUGAS ke kanban"*. Setelah rapat selesai, poin-poin TUGAS di kesimpulan otomatis jadi kartu dan langsung dikerjakan.
 
-Panel Kanban punya tiga tab: **Papan** (kartu per kolom, hasil, catatan, tombol jalankan ulang), **Aktivitas** (feed live siapa melakukan apa), dan **Berkas** (isi workspace). Papan kanban di dinding kantor 3D juga ikut update secara live.
+Panel Kanban punya tiga tab: **Papan** (kartu per kolom, hasil, catatan, tombol jalankan ulang, dan ⏹ **Hentikan** untuk kartu yang sedang dikerjakan beserta subtugasnya), **Aktivitas** (feed live siapa melakukan apa), dan **Berkas** (isi workspace, bisa diunduh). Laporan yang selesai saat browser tertutup tetap masuk ke chat begitu halaman dibuka lagi. Papan kanban di dinding kantor 3D juga ikut update secara live.
 
 Pengaman supaya agen tidak berputar-putar:
 - Delegasi maksimal 2 tingkat.
@@ -69,6 +69,19 @@ cp .env.example .env     # isi API key yang dipakai
 npm start                # buka http://127.0.0.1:3000
 ```
 
+### Ganti port
+
+Pakai salah satu cara berikut (yang paling atas paling diprioritaskan):
+
+```bash
+npm start -- --port 8080          # argumen CLI
+PORT=8080 npm start               # variabel lingkungan (Linux/macOS)
+set PORT=8080 && npm start        # Windows CMD
+$env:PORT=8080; npm start         # Windows PowerShell
+```
+
+Atau tulis `PORT=8080` di `.env` supaya permanen. Kalau port sudah dipakai program lain, server otomatis mencoba port berikutnya (misalnya 8081) dan menampilkan alamat yang dipakai di terminal.
+
 Saat pertama kali jalan, `data/office.json` dibuat dari `data/office.example.json`. File ini tidak masuk git, dan semua perubahan dari menu ⚙️ Pengaturan disimpan di sini.
 
 ### Menghubungkan provider
@@ -85,7 +98,26 @@ Setiap agen boleh memakai provider dan model yang berbeda. Contohnya, GM pakai G
 
 ### Akses dari HP / jaringan lain
 
-Secara default server hanya listen di `127.0.0.1`. Untuk membukanya ke LAN, set `HOST=0.0.0.0` **dan** isi `OFFICE_PASSWORD` di `.env`, karena siapa pun yang bisa membuka halaman ini bisa memakai kuota API kamu.
+Secara default server hanya listen di `127.0.0.1`. Untuk membukanya ke LAN, set `HOST=0.0.0.0` (atau `npm start -- --host 0.0.0.0`) **dan** isi `OFFICE_PASSWORD` di `.env`, karena siapa pun yang bisa membuka halaman ini bisa memakai kuota API kamu.
+
+### Variabel `.env` lain
+
+| Variabel | Default | Fungsi |
+|---|---|---|
+| `DATA_DIR` | `./data` | Lokasi config, kanban, dan workspace |
+| `LLM_IDLE_TIMEOUT_MS` | `120000` | Request dibatalkan kalau provider diam selama ini |
+| `TOOLS_HTTP` | `0` | `1` untuk mengaktifkan tool `fetch_url` |
+
+Request ke provider otomatis diulang sampai 2x kalau kena 429/5xx atau koneksi putus.
+
+## Tes
+
+```bash
+npm test     # tes end-to-end dengan mock LLM (tanpa API key)
+npm run check
+```
+
+Tes ini menjalankan server asli dan memeriksa: alur koordinasi (delegasi → kerja paralel → review → laporan), menghentikan kartu, fallback untuk provider tanpa tools, retry saat kena 429, keamanan path workspace, dan perpindahan port otomatis saat port bentrok.
 
 ## Kontrol
 

@@ -52,6 +52,7 @@ async function boot() {
     office.applyEvent(ev);
     boardEvent(ev);
     if (ev.type === 'report') onReport(ev);
+    if (ev.type === 'board' && !reportsSynced) syncReports(ev.tasks);
   });
 
   $('#btn-reset-cam').onclick = () => world.resetCamera();
@@ -294,16 +295,33 @@ async function sendMessage() {
 }
 
 // Laporan akhir dari koordinasi yang dimulai lewat chat.
-function onReport(ev) {
+function onReport(ev, { silent = false } = {}) {
   const a = office.get(ev.agentId);
   if (!a) return;
+  const seen = store.get('reportsSeen', []);
+  if (seen.includes(ev.taskId)) return;
+  store.set('reportsSeen', [...seen, ev.taskId].slice(-500));
   const key = 'chat.' + ev.agentId;
   const history = store.get(key, []);
-  if (history.some((m) => m.reportId === ev.taskId && m.content.includes(ev.text))) return;
   history.push({ role: 'assistant', content: `📋 **Laporan #${ev.taskId}: ${ev.title.replace(/^Koordinasi:\s*/, '')}**\n\n${ev.text}`, reportId: ev.taskId });
   store.set(key, history);
   if (panel.mode === 'chat' && panel.agentId === ev.agentId && !chatting.has(ev.agentId)) renderChat();
-  toast(`📋 ${a.data.name} mengirim laporan hasil kerja tim. Klik namanya untuk membaca.`, 6000);
+  if (!silent) toast(`📋 ${a.data.name} mengirim laporan hasil kerja tim. Klik namanya untuk membaca.`, 6000);
+}
+
+// Laporan yang selesai saat halaman tertutup tetap masuk ke chat saat dibuka lagi.
+let reportsSynced = false;
+function syncReports(tasks) {
+  reportsSynced = true;
+  let n = 0;
+  for (const t of tasks) {
+    if (t.origin?.type !== 'chat' || t.status !== 'selesai' || !t.result) continue;
+    if (!tasks.some((c) => c.parentId === t.id)) continue;
+    const before = store.get('reportsSeen', []).length;
+    onReport({ agentId: t.assignee, taskId: t.id, title: t.title, text: t.result }, { silent: true });
+    if (store.get('reportsSeen', []).length > before) n++;
+  }
+  if (n) toast(`📋 ${n} laporan baru masuk selama kamu pergi. Cek chat agen terkait.`, 6000);
 }
 
 // ---------- rapat ----------

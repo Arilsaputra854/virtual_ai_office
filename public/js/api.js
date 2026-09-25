@@ -124,10 +124,12 @@ export const tasks = {
   create: (task) => fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(task) }).then(json),
   update: (id, patch) => fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(json),
   remove: (id) => fetch(`/api/tasks/${id}`, { method: 'DELETE' }).then(json),
+  stop: (id) => fetch(`/api/tasks/${id}/stop`, { method: 'POST' }).then(json),
   clearDone: () => fetch('/api/tasks/clear-done', { method: 'POST' }).then(json),
 };
 
 export const files = {
   list: () => fetch('/api/files').then(json),
   read: (path) => fetch(`/api/files?path=${encodeURIComponent(path)}`).then(json),
+  downloadUrl: (path) => `/api/files/raw?path=${encodeURIComponent(path)}`,
 };
