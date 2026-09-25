@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Virtual AI Office</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏢</text></svg>" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three/build/three.module.js",
+        "three/addons/": "/vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <header class="hud hud-left">
+    <div class="brand"><span class="brand-dot"></span><span id="office-name">Kantor AI</span></div>
+    <ul id="roster" class="roster"></ul>
+  </header>
+
+  <nav class="hud hud-right">
+    <div class="seg" id="theme-seg">
+      <button data-theme-mode="auto" title="Ikuti jam lokal">🕒 Otomatis</button>
+      <button data-theme-mode="light">☀️ Terang</button>
+      <button data-theme-mode="dark">🌙 Gelap</button>
+    </div>
+    <button id="btn-reset-cam" class="btn">↺ Sudut awal</button>
+    <button id="btn-meeting" class="btn btn-accent">👥 Rapat</button>
+    <button id="btn-settings" class="btn">⚙️ Pengaturan</button>
+  </nav>
+
+  <!-- Panel chat / rapat -->
+  <aside id="panel" class="panel" hidden>
+    <div class="panel-head">
+      <div class="panel-title">
+        <span id="panel-dot" class="dot"></span>
+        <div>
+          <div id="panel-name" class="panel-name"></div>
+          <div id="panel-sub" class="panel-sub"></div>
+        </div>
+      </div>
+      <div class="panel-actions">
+        <button id="btn-clear" class="icon-btn" title="Hapus riwayat">🗑</button>
+        <button id="btn-close" class="icon-btn" title="Tutup">✕</button>
+      </div>
+    </div>
+    <div id="messages" class="messages"></div>
+    <form id="composer" class="composer">
+      <textarea id="input" rows="2" placeholder="Tulis pesan… (Enter kirim, Shift+Enter baris baru)"></textarea>
+      <button id="btn-send" class="btn btn-accent" type="submit">Kirim</button>
+      <button id="btn-stop" class="btn" type="button" hidden>Stop</button>
+    </form>
+  </aside>
+
+  <!-- Modal rapat -->
+  <dialog id="dlg-meeting" class="modal">
+    <form method="dialog" id="form-meeting">
+      <h2>Mulai rapat</h2>
+      <label>Topik / agenda
+        <textarea id="meeting-topic" rows="3" required placeholder="mis. Rencana fitur login dengan Google minggu ini"></textarea>
+      </label>
+      <div class="field-label">Peserta <small>(peserta pertama jadi pemimpin rapat &amp; menulis kesimpulan)</small></div>
+      <div id="meeting-people" class="people"></div>
+      <label>Jumlah putaran diskusi
+        <select id="meeting-rounds">
+          <option value="1">1 putaran</option>
+          <option value="2" selected>2 putaran</option>
+          <option value="3">3 putaran</option>
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button value="cancel" class="btn" formnovalidate>Batal</button>
+        <button value="ok" class="btn btn-accent">Mulai rapat</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal pengaturan -->
+  <dialog id="dlg-settings" class="modal modal-wide">
+    <form method="dialog" id="form-settings">
+      <h2>Pengaturan</h2>
+      <label>Nama kantor <input id="set-office-name" /></label>
+
+      <h3>Provider (OpenAI-compatible)</h3>
+      <p class="hint">Semua request lewat server lokal, jadi API key tidak pernah dikirim ke browser. Kosongkan kolom API key untuk memakai key lama / variabel <code>.env</code>.</p>
+      <div id="set-providers"></div>
+      <button type="button" id="btn-add-provider" class="btn">+ Provider</button>
+
+      <h3>Agen</h3>
+      <div id="set-agents"></div>
+      <button type="button" id="btn-add-agent" class="btn">+ Agen</button>
+
+      <div class="modal-actions">
+        <button value="cancel" class="btn" formnovalidate>Batal</button>
+        <button value="ok" class="btn btn-accent">Simpan</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

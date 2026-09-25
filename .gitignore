@@ -1,0 +1,4 @@
+node_modules/
+.env
+data/office.json
+.DS_Store

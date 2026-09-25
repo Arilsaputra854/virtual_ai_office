@@ -1,0 +1,19 @@
+{
+  "name": "virtual-ai-office",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kantor virtual 3D ringan berbasis web untuk agen AI, terhubung ke API OpenAI-compatible (9router, OpenAI, OpenRouter, Ollama, dll).",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node --check server.js && for f in public/js/*.js; do node --check \"$f\" || exit 1; done"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  }
+}
