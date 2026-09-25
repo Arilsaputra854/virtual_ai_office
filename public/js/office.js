@@ -1,6 +1,6 @@
-// "Sutradara" kantor: menempatkan agen, jalan-jalan saat idle, dan mengatur rapat.
+// "Sutradara" kantor: menempatkan agen, jalan-jalan saat idle, animasi koordinasi, dan rapat.
 import { AgentAvatar } from './agent.js';
-import { streamChat } from './api.js';
+import { streamChat, runAgent } from './api.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -40,7 +40,7 @@ export class Office {
     for (const a of this.avatars.values()) {
       a.update(dt, t);
       this.#updateScreen(a, t);
-      if (this.wander && !a.busy.size && !a.path.length && now > a.nextWander) {
+      if (this.wander && !a.busy.size && !a.visiting && !a.path.length && now > a.nextWander) {
         a.nextWander = now + rand(40, 110);
         if (a.spot === a.home) this.#wanderOut(a);
       }
@@ -54,6 +54,7 @@ export class Office {
     const atDesk = a.spot === a.home && !a.path.length;
     if (!atDesk) mat.color.set('#0f172a');
     else if (s === 'ngetik') mat.color.setHSL(0.58, 0.8, 0.45 + Math.sin(t * 18) * 0.06);
+    else if (s === 'tool') mat.color.setHSL(0.4, 0.7, 0.4 + Math.sin(t * 8) * 0.06);
     else if (s === 'mikir') mat.color.setHSL(0.75, 0.6, 0.35 + Math.sin(t * 3) * 0.08);
     else if (s === 'error') mat.color.set('#7f1d1d');
     else mat.color.set('#1e40af');
@@ -84,38 +85,89 @@ export class Office {
       const ok = await a.goTo(a.home);
       if (!ok) return;
     }
-    if (!a.busy.size) a.setStatus(status);
+    if (a.serverStatus) a.setStatus(...a.serverStatus);
+    else if (!a.busy.size) a.setStatus(status);
   }
 
-  // ---------- chat 1-on-1 ----------
+  // ---------- chat 1-on-1 (dengan tools) ----------
 
-  async chat(agentId, messages, { onDelta, signal } = {}) {
+  // Status & balon teks agen datang dari event server (applyEvent), bukan dari sini.
+  async chat(agentId, messages, { onEvent, signal } = {}) {
     const a = this.get(agentId);
-    a.busy.add('chat');
-    if (!this.meeting?.ids.includes(agentId) && a.spot !== a.home) this.sendHome(a);
-    a.setStatus('mikir');
+    if (!this.meeting?.ids.includes(agentId) && a.spot !== a.home && !a.visiting) this.sendHome(a);
     try {
-      const text = await streamChat(agentId, messages, {
-        signal,
-        onDelta: (d, full) => {
-          if (a.status !== 'ngetik') a.setStatus('ngetik');
-          a.say(stripThink(full), 0);
-          onDelta?.(d, full);
-        },
-      });
-      a.say(stripThink(text), 5000);
-      return text;
+      return await runAgent(agentId, messages, { signal, onEvent });
     } catch (err) {
-      a.setStatus('error');
       a.say(err.name === 'AbortError' ? 'Oke, berhenti.' : '⚠️ ' + err.message, 6000);
       throw err;
-    } finally {
-      a.busy.delete('chat');
-      setTimeout(() => {
-        if (!a.busy.size && a.status !== 'error' && !a.path.length) a.setStatus(this.#restStatus(a));
-        if (a.status === 'error') setTimeout(() => !a.busy.size && a.setStatus(this.#restStatus(a)), 5000);
-      }, 400);
     }
+  }
+
+  // ---------- event live dari server ----------
+
+  applyEvent(ev) {
+    if (ev.type === 'board') {
+      this.tasks = ev.tasks;
+      this.world.setKanban(ev.tasks, (id) => this.get(id)?.data.color || '#94a3b8');
+      return;
+    }
+    if (ev.type === 'handoff') return this.#visit(ev.from, ev.to, ev.text);
+    const a = this.get(ev.agentId);
+    if (!a) return;
+    if (ev.type === 'say') {
+      if (!a.busy.has('rapat')) a.say(ev.text, 6000);
+      return;
+    }
+    if (ev.type !== 'agent') return;
+    if (ev.status === 'idle') {
+      a.busy.delete('server');
+      a.serverStatus = null;
+      setTimeout(() => {
+        if (!a.busy.size && !a.path.length) a.setStatus(this.#restStatus(a));
+      }, 300);
+      return;
+    }
+    if (ev.status === 'error') {
+      a.busy.delete('server');
+      a.serverStatus = null;
+      a.setStatus('error', ev.text ? 'error: ' + ev.text.slice(0, 40) : undefined);
+      setTimeout(() => !a.busy.size && a.status === 'error' && a.setStatus(this.#restStatus(a)), 8000);
+      return;
+    }
+    a.busy.add('server');
+    a.serverStatus = [ev.status, ev.text || undefined];
+    if (a.busy.has('rapat')) return;
+    if (!a.path.length) a.setStatus(...a.serverStatus);
+    // agen yang sedang mengerjakan kartu kembali ke mejanya
+    if (ev.taskId && a.spot !== a.home && !a.path.length && !a.visiting) this.sendHome(a);
+  }
+
+  // Agen berjalan ke meja rekan untuk menyerahkan tugas / bertanya, lalu kembali.
+  #visit(fromId, toId, text) {
+    const a = this.get(fromId);
+    const b = this.get(toId);
+    if (!a || !b || a === b) return;
+    a.say(`@${b.data.name}: ${text}`, 5000);
+    if (a.busy.has('rapat') || b.busy.has('rapat')) return;
+    (a.visits ||= []).push(b);
+    if (a.visiting) return;
+    a.visiting = true;
+    (async () => {
+      while (a.visits.length) {
+        const target = a.visits.shift();
+        const h = target.home;
+        a.setStatus('jalan', `ke meja ${target.data.name}`);
+        const ok = await a.goTo({ x: h.x + 0.4, z: h.z + 0.85, rotY: Math.PI, pose: 'stand' });
+        if (!ok) break;
+        a.root.rotation.y = Math.atan2(h.x - a.root.position.x, h.z - a.root.position.z);
+        a.setStatus('ngobrol', `ngobrol sama ${target.data.name}`);
+        target.say(`👍 siap, ${a.data.name}`, 2500);
+        await sleep(1800);
+      }
+      a.visits = [];
+      a.visiting = false;
+      if (!a.busy.has('rapat')) await this.sendHome(a);
+    })();
   }
 
   #restStatus(a) {

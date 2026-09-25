@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && for f in public/js/*.js; do node --check \"$f\" || exit 1; done"
+    "check": "node --check server.js && for f in lib/*.js public/js/*.js; do node --check \"$f\" || exit 1; done"
   },
   "engines": {
     "node": ">=18"

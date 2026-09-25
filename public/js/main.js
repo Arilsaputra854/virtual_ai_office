@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { World } from './world.js';
 import { Office, stripThink } from './office.js';
 import { STATUS } from './agent.js';
-import { getConfig } from './api.js';
+import { getConfig, subscribe } from './api.js';
+import { setupBoard, boardEvent, showBoard } from './boardui.js';
 import { openSettings } from './settings.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
 
@@ -46,6 +47,12 @@ async function boot() {
   setupPicking();
   setupPanel();
   setupMeeting();
+  setupBoard({ office, config, openChat, toast });
+  subscribe((ev) => {
+    office.applyEvent(ev);
+    boardEvent(ev);
+    if (ev.type === 'report') onReport(ev);
+  });
 
   $('#btn-reset-cam').onclick = () => world.resetCamera();
   $('#btn-settings').onclick = () => openSettings(config, () => location.reload());
@@ -122,14 +129,16 @@ function setupPicking() {
     ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
     ray.setFromCamera(ndc, world.camera);
     const roots = [...office.avatars.values()].map((a) => a.root);
-    const hit = ray.intersectObjects(roots, true)[0];
-    if (hit) openChat(hit.object.userData.agentId);
+    const hit = ray.intersectObjects([...roots, world.kanbanMesh], true)[0];
+    if (hit?.object === world.kanbanMesh) showBoard('papan');
+    else if (hit) openChat(hit.object.userData.agentId);
   });
 }
 
 // ---------- panel chat & rapat ----------
 
 const panel = { mode: null, agentId: null, controller: null };
+const chatting = new Set(); // agen yang sedang membalas chat kita
 
 function setupPanel() {
   $('#btn-close').onclick = () => {
@@ -172,7 +181,7 @@ function openChat(agentId) {
   $('#btn-clear').title = 'Hapus riwayat';
   $('#composer').hidden = false;
   renderChat();
-  setBusy(a.busy.has('chat'));
+  setBusy(chatting.has(agentId));
   $('#input').focus();
 }
 
@@ -184,20 +193,45 @@ function renderChat() {
     const a = office.get(panel.agentId);
     box.innerHTML = `<div class="empty">Mulai ngobrol dengan <b>${escapeHtml(a.data.name)}</b>.<br><small>${escapeHtml(a.data.role || '')}</small></div>`;
   }
-  for (const m of history) box.appendChild(messageEl(m.role, m.content));
+  for (const m of history) box.appendChild(messageEl(m.role, m.content, null, m.tools));
   box.scrollTop = box.scrollHeight;
 }
 
-function messageEl(role, content, name) {
+function messageEl(role, content, name, tools = []) {
   const div = document.createElement('div');
   div.className = 'msg ' + role;
   if (name) div.innerHTML = `<div class="msg-name"></div>`;
   if (name) div.firstChild.textContent = name;
+  const toolBox = document.createElement('div');
+  toolBox.className = 'tools';
+  for (const t of tools || []) toolBox.appendChild(toolChip(t));
+  div.appendChild(toolBox);
   const body = document.createElement('div');
   body.className = 'msg-body';
   body.innerHTML = role === 'user' ? escapeHtml(content).replace(/\n/g, '<br>') : renderMarkdown(stripThink(content));
   div.appendChild(body);
   return div;
+}
+
+const TOOL_ICON = { create_task: '📌', update_task: '🗂', list_tasks: '📋', ask_agent: '💬', read_file: '📖', write_file: '📝', list_files: '📁', fetch_url: '🌐' };
+
+function toolChip(t) {
+  const el = document.createElement('div');
+  el.className = 'tool-chip' + (t.ok === false ? ' fail' : t.ok ? ' ok' : '');
+  const a = t.args || {};
+  const who = (ref) => office.get(ref)?.data.name || ref;
+  const desc =
+    {
+      create_task: `delegasi ke ${who(a.assignee)}: ${a.title || ''}`,
+      ask_agent: `tanya ${who(a.agent)}: ${a.question || ''}`,
+      update_task: `kartu #${a.id}${a.status ? ' → ' + a.status : ''}${a.note ? ' — ' + a.note : ''}`,
+      write_file: `tulis ${a.path}`,
+      read_file: `baca ${a.path}`,
+      fetch_url: a.url,
+    }[t.name] || t.name;
+  el.textContent = `${TOOL_ICON[t.name] || '🔧'} ${desc}`;
+  if (t.text) el.title = t.text;
+  return el;
 }
 
 function setBusy(busy) {
@@ -209,7 +243,7 @@ async function sendMessage() {
   const input = $('#input');
   const text = input.value.trim();
   const agentId = panel.agentId;
-  if (!text || panel.mode !== 'chat' || office.get(agentId).busy.has('chat')) return;
+  if (!text || panel.mode !== 'chat' || chatting.has(agentId)) return;
   input.value = '';
 
   const key = 'chat.' + agentId;
@@ -223,21 +257,29 @@ async function sendMessage() {
   reply.classList.add('streaming');
   box.appendChild(reply);
   const body = reply.querySelector('.msg-body');
+  const toolBox = reply.querySelector('.tools');
   body.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  const tools = [];
 
   panel.controller = new AbortController();
+  chatting.add(agentId);
   setBusy(true);
   try {
-    const full = await office.chat(agentId, history, {
+    const res = await office.chat(agentId, history, {
       signal: panel.controller.signal,
-      onDelta: (_d, all) => {
-        if (panel.agentId !== agentId) return;
-        body.innerHTML = renderMarkdown(stripThink(all));
-        box.scrollTop = box.scrollHeight;
+      onEvent: (ev) => {
+        if (ev.agentId !== agentId) return;
+        if (ev.type === 'delta') body.innerHTML = renderMarkdown(stripThink(ev.text)) || body.innerHTML;
+        if (ev.type === 'tool') tools.push({ name: ev.name, args: ev.args });
+        if (ev.type === 'tool_result') Object.assign(tools.findLast((t) => t.name === ev.name && t.ok === undefined) || {}, { ok: ev.ok, text: ev.text });
+        if (ev.type === 'tool' || ev.type === 'tool_result') toolBox.replaceChildren(...tools.map(toolChip));
+        if (panel.agentId === agentId) box.scrollTop = box.scrollHeight;
       },
     });
-    history.push({ role: 'assistant', content: full });
+    body.innerHTML = renderMarkdown(stripThink(res.text)) || '<small>(tanpa teks)</small>';
+    history.push({ role: 'assistant', content: res.text || '(selesai)', tools });
     store.set(key, history);
+    if (res.taskId) toast(`📋 Tugas dibagikan ke tim (kartu #${res.taskId}). Laporan akan dikirim saat selesai.`, 5000);
   } catch (err) {
     if (err.name !== 'AbortError') {
       body.innerHTML = `<span class="err">⚠️ ${escapeHtml(err.message)}</span>`;
@@ -246,8 +288,22 @@ async function sendMessage() {
   } finally {
     reply.classList.remove('streaming');
     panel.controller = null;
+    chatting.delete(agentId);
     if (panel.agentId === agentId) setBusy(false);
   }
+}
+
+// Laporan akhir dari koordinasi yang dimulai lewat chat.
+function onReport(ev) {
+  const a = office.get(ev.agentId);
+  if (!a) return;
+  const key = 'chat.' + ev.agentId;
+  const history = store.get(key, []);
+  if (history.some((m) => m.reportId === ev.taskId && m.content.includes(ev.text))) return;
+  history.push({ role: 'assistant', content: `📋 **Laporan #${ev.taskId}: ${ev.title.replace(/^Koordinasi:\s*/, '')}**\n\n${ev.text}`, reportId: ev.taskId });
+  store.set(key, history);
+  if (panel.mode === 'chat' && panel.agentId === ev.agentId && !chatting.has(ev.agentId)) renderChat();
+  toast(`📋 ${a.data.name} mengirim laporan hasil kerja tim. Klik namanya untuk membaca.`, 6000);
 }
 
 // ---------- rapat ----------
@@ -274,7 +330,7 @@ function setupMeeting() {
     const topic = $('#meeting-topic').value.trim();
     if (ids.length < 2) return toast('Pilih minimal 2 peserta.');
     if (!topic) return toast('Topik rapat wajib diisi.');
-    startMeeting({ topic, ids: ids.slice(0, world.spots.meeting.length), rounds: Number($('#meeting-rounds').value) });
+    startMeeting({ topic, ids: ids.slice(0, world.spots.meeting.length), rounds: Number($('#meeting-rounds').value), toTasks: $('#meeting-tasks').checked });
   });
 }
 
@@ -337,8 +393,40 @@ async function startMeeting(opts) {
     });
     saveMeeting(opts, meeting);
     note('Rapat selesai. Hasil tampil di layar TV ruang meeting.');
+    if (opts.toTasks) await meetingToTasks(opts, meeting, note, add);
   } catch {
     /* sudah ditampilkan lewat event 'error' */
+  }
+}
+
+// Pemimpin rapat mengubah poin TUGAS jadi kartu kanban (lewat tool create_task),
+// lalu tim otomatis mengerjakannya dan pemimpin mengirim laporan.
+async function meetingToTasks(opts, meeting, note, add) {
+  const leader = office.get(opts.ids[0]);
+  note(`${leader.data.name} membagikan tugas ke kanban…`);
+  const others = opts.ids.slice(1).map((id) => office.get(id).data.name).join(', ');
+  const prompt = `Rapat "${opts.topic}" baru selesai. Kesimpulannya:\n\n${meeting.summary}\n\nBuat kartu kanban dengan create_task untuk setiap poin TUGAS yang ditujukan ke rekan (${others}), dengan detail yang jelas dan bisa langsung dikerjakan. Tugas untuk dirimu sendiri tidak perlu dibuat kartunya. Setelah itu jawab singkat siapa mengerjakan apa.`;
+  const el = messageEl('assistant', '', `${leader.data.name} · pembagian tugas`);
+  el.style.setProperty('--c', leader.data.color);
+  el.classList.add('meet', 'streaming');
+  add(el);
+  const tools = [];
+  try {
+    const res = await office.chat(leader.id, [{ role: 'user', content: prompt }], {
+      onEvent: (ev) => {
+        if (ev.agentId !== leader.id) return;
+        if (ev.type === 'tool') tools.push({ name: ev.name, args: ev.args });
+        if (ev.type === 'tool_result') Object.assign(tools.findLast((t) => t.name === ev.name && t.ok === undefined) || {}, { ok: ev.ok, text: ev.text });
+        el.querySelector('.tools').replaceChildren(...tools.map(toolChip));
+        if (ev.type === 'delta') el.querySelector('.msg-body').innerHTML = renderMarkdown(stripThink(ev.text));
+      },
+    });
+    el.querySelector('.msg-body').innerHTML = renderMarkdown(stripThink(res.text));
+    if (!tools.some((t) => t.name === 'create_task')) note('Model tidak membuat kartu (mungkin tidak mendukung tool calling). Buat manual di 📋 Kanban.', 'note err');
+  } catch (err) {
+    note('Gagal membagi tugas: ' + err.message, 'note err');
+  } finally {
+    el.classList.remove('streaming');
   }
 }
 

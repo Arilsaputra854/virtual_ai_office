@@ -30,6 +30,7 @@
       <button data-theme-mode="dark">🌙 Gelap</button>
     </div>
     <button id="btn-reset-cam" class="btn">↺ Sudut awal</button>
+    <button id="btn-board" class="btn">📋 Kanban <span id="board-count" class="badge"></span></button>
     <button id="btn-meeting" class="btn btn-accent">👥 Rapat</button>
     <button id="btn-settings" class="btn">⚙️ Pengaturan</button>
   </nav>
@@ -57,6 +58,41 @@
     </form>
   </aside>
 
+  <!-- Panel kanban -->
+  <aside id="board" class="panel board-panel" hidden>
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="dot" style="background:#6366f1"></span>
+        <div>
+          <div class="panel-name">📋 Kanban tim</div>
+          <div id="board-sub" class="panel-sub"></div>
+        </div>
+      </div>
+      <div class="panel-actions">
+        <button id="board-clear" class="icon-btn" title="Bersihkan kartu selesai">🧹</button>
+        <button id="board-close" class="icon-btn" title="Tutup">✕</button>
+      </div>
+    </div>
+    <div class="tabs">
+      <button data-tab="papan" class="active">Papan</button>
+      <button data-tab="aktivitas">Aktivitas</button>
+      <button data-tab="berkas">Berkas</button>
+    </div>
+    <details id="task-new" class="task-new">
+      <summary>+ Tugas baru</summary>
+      <form id="task-form">
+        <input id="task-title" placeholder="Judul tugas, mis. Riset kompetitor aplikasi kasir" required maxlength="140" />
+        <textarea id="task-detail" rows="3" placeholder="Detail / hasil yang diharapkan (opsional)"></textarea>
+        <div class="row">
+          <select id="task-assignee"></select>
+          <button class="btn btn-accent small" type="submit">Tambah</button>
+        </div>
+        <small class="hint">Tugas yang ditugaskan langsung dikerjakan agen itu. Agen bisa mendelegasikan bagian-bagiannya ke rekan lalu mereview hasilnya.</small>
+      </form>
+    </details>
+    <div id="board-body" class="board-body"></div>
+  </aside>
+
   <!-- Modal rapat -->
   <dialog id="dlg-meeting" class="modal">
     <form method="dialog" id="form-meeting">
@@ -73,6 +109,7 @@
           <option value="3">3 putaran</option>
         </select>
       </label>
+      <label class="check"><input type="checkbox" id="meeting-tasks" checked /> Setelah rapat, pemimpin membagi TUGAS ke kanban dan tim langsung mengerjakannya</label>
       <div class="modal-actions">
         <button value="cancel" class="btn" formnovalidate>Batal</button>
         <button value="ok" class="btn btn-accent">Mulai rapat</button>
@@ -85,6 +122,7 @@
     <form method="dialog" id="form-settings">
       <h2>Pengaturan</h2>
       <label>Nama kantor <input id="set-office-name" /></label>
+      <label class="check"><input type="checkbox" id="set-autorun" /> Jalankan tugas kanban otomatis (agen langsung mengerjakan kartu yang ditugaskan ke mereka)</label>
 
       <h3>Provider (OpenAI-compatible)</h3>
       <p class="hint">Semua request lewat server lokal, jadi API key tidak pernah dikirim ke browser. Kosongkan kolom API key untuk memakai key lama / variabel <code>.env</code>.</p>

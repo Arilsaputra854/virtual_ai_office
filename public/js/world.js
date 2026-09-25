@@ -236,7 +236,7 @@ export class World {
     this.#window('left', 0.4, 2.4);
     this.#window('left', 4.4, 2.4);
 
-    this.#kanban(-5.4, 1.9);
+    this.#kanban(-5.4, 1.1);
     this.#clock(0.35, 2.55);
     this.#shelf(-10.5, -5.2);
 
@@ -300,30 +300,85 @@ export class World {
 
   #kanban(x, y) {
     const w = 3.6;
-    const h = 1.5;
-    const tex = canvasTexture(512, 214, (g, cw, ch) => {
-      g.fillStyle = '#f8fafc';
-      g.fillRect(0, 0, cw, ch);
-      g.fillStyle = '#1e293b';
-      g.font = 'bold 16px sans-serif';
-      ['TODO', 'PROSES', 'REVIEW', 'SELESAI'].forEach((t, i) => g.fillText(t, 14 + i * 126, 22));
-      const colors = ['#fca5a5', '#fde68a', '#a7f3d0', '#bfdbfe', '#f9a8d4', '#c4b5fd'];
-      for (let col = 0; col < 4; col++) {
-        for (let r = 0; r < 3 + (col % 2); r++) {
-          if ((col * 7 + r * 3) % 5 === 4) continue;
-          g.fillStyle = colors[(col * 3 + r) % colors.length];
-          const px = 14 + col * 126 + (r % 2) * 50;
-          const py = 34 + Math.floor(r / 1) * 42;
-          g.fillRect(px, py, 44, 36);
-        }
-      }
-      g.strokeStyle = '#cbd5e1';
-      for (let i = 1; i < 4; i++) g.fillRect(i * 126 + 4, 8, 1, ch - 16);
-    });
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({ map: tex }));
+    const h = 1.6;
+    const c = document.createElement('canvas');
+    c.width = 1024;
+    c.height = 455;
+    this.kanbanCanvas = c;
+    this.kanbanTex = new THREE.CanvasTexture(c);
+    this.kanbanTex.colorSpace = THREE.SRGBColorSpace;
+    this.kanbanTex.anisotropy = 4;
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: this.kanbanTex }));
     board.position.set(x, y + h / 2, ROOM.minZ + 0.04);
     this.scene.add(board);
-    this.box(w + 0.1, 0.06, 0.12, '#94a3b8', x, y - 0.06, ROOM.minZ + 0.06, { shadow: false });
+    this.kanbanMesh = board;
+    this.box(w + 0.12, h + 0.12, 0.05, '#e5e7eb', x, y - 0.06, ROOM.minZ + 0.01, { shadow: false });
+    const el = document.createElement('div');
+    el.className = 'zone clickable';
+    el.textContent = '📋 Kanban';
+    const label = new CSS2DObject(el);
+    label.position.set(x, y + h + 0.05, ROOM.minZ + 0.1);
+    this.scene.add(label);
+    this.kanbanLabel = el;
+    this.setKanban([]);
+  }
+
+  // Gambar ulang papan kanban di dinding. colorOf(agentId) → warna kartu.
+  setKanban(tasks, colorOf = () => '#94a3b8') {
+    const c = this.kanbanCanvas;
+    const g = c.getContext('2d');
+    const W = c.width;
+    const H = c.height;
+    g.fillStyle = '#f8fafc';
+    g.fillRect(0, 0, W, H);
+    const cols = [
+      ['TODO', (t) => t.status === 'todo', '#64748b'],
+      ['PROSES', (t) => t.status === 'proses', '#3b82f6'],
+      ['REVIEW', (t) => t.status === 'review', '#f59e0b'],
+      ['SELESAI', (t) => t.status === 'selesai' || t.status === 'gagal', '#10b981'],
+    ];
+    const colW = W / 4;
+    const open = tasks.filter((t) => ['todo', 'proses', 'review'].includes(t.status)).length;
+    this.kanbanLabel.textContent = `📋 Kanban · ${open} terbuka`;
+    cols.forEach(([name, filter, color], i) => {
+      const x0 = i * colW;
+      const list = tasks.filter(filter).sort((a, b) => b.updatedAt - a.updatedAt);
+      g.fillStyle = i % 2 ? '#f1f5f9' : '#f8fafc';
+      g.fillRect(x0, 0, colW, H);
+      g.fillStyle = color;
+      g.fillRect(x0 + 12, 14, colW - 24, 6);
+      g.fillStyle = '#0f172a';
+      g.font = 'bold 26px sans-serif';
+      g.fillText(`${name}`, x0 + 14, 52);
+      g.fillStyle = '#64748b';
+      g.font = '22px sans-serif';
+      g.fillText(String(list.length), x0 + colW - 40, 52);
+      const cardH = 62;
+      const max = 5;
+      list.slice(0, max).forEach((t, k) => {
+        const y = 70 + k * (cardH + 10);
+        g.fillStyle = '#ffffff';
+        g.fillRect(x0 + 12, y, colW - 24, cardH);
+        g.fillStyle = t.status === 'gagal' ? '#ef4444' : colorOf(t.assignee);
+        g.fillRect(x0 + 12, y, 10, cardH);
+        g.strokeStyle = '#e2e8f0';
+        g.lineWidth = 2;
+        g.strokeRect(x0 + 12, y, colW - 24, cardH);
+        g.fillStyle = '#0f172a';
+        g.font = 'bold 19px sans-serif';
+        g.fillText(fit(g, `#${t.id} ${t.title}`, colW - 50), x0 + 30, y + 26);
+        g.fillStyle = '#64748b';
+        g.font = '17px sans-serif';
+        const sub = t.status === 'gagal' ? 'gagal' : t.waiting ? 'menunggu subtugas' : t.assignee || 'belum ditugaskan';
+        g.fillText(fit(g, sub, colW - 50), x0 + 30, y + 50);
+      });
+      if (list.length > max) {
+        g.fillStyle = '#64748b';
+        g.font = '18px sans-serif';
+        g.fillText(`+${list.length - max} lagi`, x0 + 16, 70 + max * (cardH + 10) + 16);
+      }
+    });
+    this.kanbanTex.needsUpdate = true;
   }
 
   #clock(x, y) {
@@ -743,6 +798,13 @@ export class World {
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
   }
+}
+
+function fit(g, text, maxW) {
+  if (g.measureText(text).width <= maxW) return text;
+  let s = text;
+  while (s.length > 1 && g.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+  return s + '…';
 }
 
 function wrapText(g, text, maxW) {

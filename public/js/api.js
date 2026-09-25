@@ -62,3 +62,72 @@ export async function streamChat(agentId, messages, { onDelta, signal } = {}) {
   }
   return full;
 }
+
+// Parser SSE generik: memanggil onEvent(obj) untuk tiap baris "data: {...}".
+async function readSse(res, onEvent) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      try {
+        onEvent(JSON.parse(line.slice(5)));
+      } catch {
+        /* abaikan baris rusak */
+      }
+    }
+  }
+}
+
+// Chat dengan agen yang bisa memakai tools (delegasi, kanban, file).
+// onEvent menerima {type: 'delta'|'tool'|'tool_result'}; resolve dengan teks akhir.
+export async function runAgent(agentId, messages, { onEvent, signal } = {}) {
+  const res = await fetch('/api/agent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agentId, messages }),
+    signal,
+  });
+  if (!res.ok) await json(res);
+  let final = null;
+  let error = null;
+  await readSse(res, (ev) => {
+    if (ev.type === 'done') final = ev;
+    else if (ev.type === 'error') error = ev.error;
+    else onEvent?.(ev);
+  });
+  if (error) throw Object.assign(new Error(error), error === 'dibatalkan' ? { name: 'AbortError' } : {});
+  if (!final) throw new Error('Koneksi terputus');
+  return final;
+}
+
+// Event live dari server (status agen, kanban, handoff, log, laporan).
+export function subscribe(onEvent) {
+  const es = new EventSource('/api/events');
+  es.onmessage = (e) => {
+    try {
+      onEvent(JSON.parse(e.data));
+    } catch {
+      /* abaikan */
+    }
+  };
+  return es;
+}
+
+export const tasks = {
+  create: (task) => fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(task) }).then(json),
+  update: (id, patch) => fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then(json),
+  remove: (id) => fetch(`/api/tasks/${id}`, { method: 'DELETE' }).then(json),
+  clearDone: () => fetch('/api/tasks/clear-done', { method: 'POST' }).then(json),
+};
+
+export const files = {
+  list: () => fetch('/api/files').then(json),
+  read: (path) => fetch(`/api/files?path=${encodeURIComponent(path)}`).then(json),
+};

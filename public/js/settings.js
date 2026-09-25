@@ -27,6 +27,7 @@ function providerCard(p = {}) {
         <span class="row"><input name="defaultModel" list="models-${attr(p.id || 'new')}" value="${attr(p.defaultModel)}" placeholder="gpt-4o-mini"><button type="button" class="btn small" data-act="models">Ambil model</button></span>
         <datalist id="models-${attr(p.id || 'new')}"></datalist>
       </label>
+      <label class="check"><input type="checkbox" name="tools" ${p.tools === false ? '' : 'checked'}> Tool calling (delegasi, kanban, file)</label>
     </div>
     <div class="card-foot"><small class="status"></small><button type="button" class="btn small danger" data-act="remove">Hapus</button></div>`;
   $('[data-act=remove]', el).onclick = () => el.remove();
@@ -74,7 +75,7 @@ function fillModelLists(providerId, models) {
 
 function readCard(el) {
   const out = { id: el.dataset.id || undefined };
-  for (const input of el.querySelectorAll('[name]')) out[input.name] = input.value.trim();
+  for (const input of el.querySelectorAll('[name]')) out[input.name] = input.type === 'checkbox' ? input.checked : input.value.trim();
   return out;
 }
 
@@ -82,6 +83,7 @@ export function openSettings(config, onSaved) {
   const dlg = $('#dlg-settings');
   const form = $('#form-settings');
   $('#set-office-name').value = config.officeName || '';
+  $('#set-autorun').checked = config.autoRun !== false;
   const provBox = $('#set-providers');
   const agentBox = $('#set-agents');
   provBox.replaceChildren(...config.providers.map(providerCard));
@@ -111,7 +113,7 @@ export function openSettings(config, onSaved) {
     if (!agents.length) return alert('Minimal harus ada 1 agen.');
     if (agents.length > 9) return alert('Maksimal 9 agen (jumlah meja di kantor).');
     try {
-      await saveConfig({ officeName: $('#set-office-name').value.trim(), providers, agents });
+      await saveConfig({ officeName: $('#set-office-name').value.trim(), autoRun: $('#set-autorun').checked, providers, agents });
       dlg.close();
       onSaved();
     } catch (err) {

@@ -14,6 +14,8 @@ export const STATUS = {
   ngopi: 'ngopi',
   santai: 'santai',
   jalan: 'jalan',
+  tool: 'pakai tool',
+  ngobrol: 'ngobrol',
   error: 'error',
 };
 
